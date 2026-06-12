@@ -335,8 +335,12 @@
 // ═══════════════════════════════════════════════
 //  НАСТРОЙКИ — ЗАПОЛНИ ПЕРЕД ПУБЛИКАЦИЕЙ
 // ═══════════════════════════════════════════════
-const BOT_TOKEN      = "8627114598:AAFl3DHodLOosZhv-6O8texKgiorcccYti0";   // токен бота от @BotFather
+const BOT_TOKEN      = "ТВОЙ_BOT_TOKEN";   // токен бота от @BotFather
 const CHAT_ID        = "-5403983042";       // ID твоей группы/беседы
+
+// YouGile — оставь пустыми если не используешь
+const YOUGILE_TOKEN     = "";   // токен из настроек YouGile → раздел API
+const YOUGILE_COLUMN_ID = "";   // ID колонки куда падают карточки
 
 // ═══════════════════════════════════════════════
 //  ШАГИ ОПРОСА
@@ -561,13 +565,58 @@ function advance() {
 }
 
 // ═══════════════════════════════════════════════
-//  ОТПРАВКА В TELEGRAM
+//  ОТПРАВКА В TELEGRAM + YOUGILE
 // ═══════════════════════════════════════════════
+
+async function sendToTelegram(text) {
+  try {
+    const resp = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: CHAT_ID, text, parse_mode: "Markdown" }),
+    });
+    const data = await resp.json();
+    return data.ok;
+  } catch { return false; }
+}
+
+async function sendToYougile(now) {
+  if (!YOUGILE_TOKEN || !YOUGILE_COLUMN_ID) return true; // не настроено — пропускаем
+
+  const title = answers.name || "Заявка с сайта";
+  const description = [
+    `Имя / Организация: ${answers.name || "—"}`,
+    `Контакт: ${answers.contact || "—"}`,
+    `Ниша: ${answers.niche || "—"}`,
+    `Цель продвижения: ${answers.goal || "—"}`,
+    `Опыт с блогерами: ${answers.experience || "—"}`,
+    `Бюджет: ${answers.budget || "—"}`,
+    ``,
+    `Дата: ${now}`,
+    `Источник: сайт (HTML-форма)`,
+  ].join("\n");
+
+  try {
+    const resp = await fetch("https://ru.yougile.com/api-v2/tasks", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${YOUGILE_TOKEN}`,
+      },
+      body: JSON.stringify({
+        title,
+        columnId: YOUGILE_COLUMN_ID,
+        description,
+      }),
+    });
+    return resp.status === 200 || resp.status === 201;
+  } catch { return false; }
+}
+
 async function sendAndFinish() {
   updateProgress();
   bar.style.width = "100%";
 
-  // Показываем промежуточный экран «Отправляем...»
   const loadCard = document.createElement("div");
   loadCard.className = "card finish";
   loadCard.innerHTML = `
@@ -581,7 +630,7 @@ async function sendAndFinish() {
 
   const now = new Date().toLocaleString("ru-RU", { timeZone: "Europe/Moscow" });
 
-  const text = [
+  const tgText = [
     "📨 *Новая заявка с сайта!*\n",
     `🏢 *Имя / Организация:* ${answers.name || "—"}`,
     `📱 *Контакт:* ${answers.contact || "—"}`,
@@ -592,24 +641,12 @@ async function sendAndFinish() {
     `\n🕐 ${now} (МСК)`,
   ].join("\n");
 
-  let ok = false;
-  try {
-    const resp = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        chat_id: CHAT_ID,
-        text: text,
-        parse_mode: "Markdown",
-      }),
-    });
-    const data = await resp.json();
-    ok = data.ok;
-  } catch (e) {
-    ok = false;
-  }
+  // Отправляем параллельно в оба сервиса
+  const [tgOk] = await Promise.all([
+    sendToTelegram(tgText),
+    sendToYougile(now),
+  ]);
 
-  // Финальный экран
   setTimeout(() => {
     loadCard.classList.add("exit");
     setTimeout(() => {
@@ -617,7 +654,7 @@ async function sendAndFinish() {
       const fin = document.createElement("div");
       fin.className = "card";
 
-      if (ok) {
+      if (tgOk) {
         fin.innerHTML = `
           <div class="finish">
             <span class="finish-icon">💜</span>
